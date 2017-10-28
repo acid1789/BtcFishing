@@ -48,5 +48,11 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BtcLib\BtcLib.csproj">
+      <Project>{f9dc90cc-cd01-4e30-a7f2-a97f75f0b44f}</Project>
+      <Name>BtcLib</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -40,7 +40,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Network.cs" />
+    <Compile Include="BtcBlockChain.cs" />
+    <Compile Include="BtcSocket.cs" />
+    <Compile Include="BtcNetwork.cs" />
+    <Compile Include="BtcUtils.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
