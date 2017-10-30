@@ -40,7 +40,7 @@ namespace BtcLib
         public bool Connect(string remoteHost, int remotePort)
         {
             // Connect to the host
-            //Console.WriteLine("Connecting to: " + remoteHost + ":" + remotePort);
+            //BtcLog.Print("Connecting to: " + remoteHost + ":" + remotePort);
             _remoteHost = remoteHost;
             _socket.Connect(remoteHost, remotePort);
             if (!_socket.Connected)
@@ -164,7 +164,7 @@ namespace BtcLib
 
         void ProcessCommand(string command, byte[] payload)
         {
-            //Console.WriteLine("ProcessCommand: " + command);
+            //BtcLog.Print("ProcessCommand: " + command);
 
             switch (command)
             {
@@ -177,7 +177,7 @@ namespace BtcLib
                 case "inv": ProcessInv(payload); break;
                 case "encinit": ProcessEncInit(payload); break;
                 default:
-                    Console.WriteLine("ProcessCommand - Unhandled command: " + command);
+                    BtcLog.Print("ProcessCommand - Unhandled command: " + command);
                     break;
             }
         }
@@ -239,7 +239,7 @@ namespace BtcLib
                 hashes.Add(b);
             }
 
-            Console.WriteLine("Recieved getheaders but not currently doing anything with it");
+            BtcLog.Print("Recieved getheaders but not currently doing anything with it");
 
         }
 
@@ -265,7 +265,7 @@ namespace BtcLib
             byte[] remotePubKey = br.ReadBytes(33);
             byte cypherType = br.ReadByte();
 
-            Console.WriteLine("encinit receivied from remote host {0}, not supported", _remoteHost);
+            BtcLog.Print("encinit receivied from remote host {0}, not supported", _remoteHost);
             _socket.Close();            
         }
         #endregion

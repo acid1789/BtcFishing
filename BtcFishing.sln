@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcFishing", "BtcFishing\Bt
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcLib", "BtcLib\BtcLib.csproj", "{F9DC90CC-CD01-4E30-A7F2-A97F75F0B44F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BtcFishingUI", "BtcFishingUI\BtcFishingUI.csproj", "{10C4A19D-FE11-4869-AEAD-C11D546541AD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{F9DC90CC-CD01-4E30-A7F2-A97F75F0B44F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F9DC90CC-CD01-4E30-A7F2-A97F75F0B44F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F9DC90CC-CD01-4E30-A7F2-A97F75F0B44F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10C4A19D-FE11-4869-AEAD-C11D546541AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10C4A19D-FE11-4869-AEAD-C11D546541AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10C4A19D-FE11-4869-AEAD-C11D546541AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10C4A19D-FE11-4869-AEAD-C11D546541AD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

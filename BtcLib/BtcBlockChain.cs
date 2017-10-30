@@ -13,7 +13,7 @@ namespace BtcLib
 
         public static void AddKnownBlock(byte[] blockHash)
         {
-            Console.WriteLine("AddKnownBlock: " + BtcUtils.BytesToString(blockHash));
+            BtcLog.Print("AddKnownBlock: " + BtcUtils.BytesToString(blockHash));
         }
         #endregion
 

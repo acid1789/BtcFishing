@@ -31,6 +31,7 @@ namespace BtcLib
         }
 
         public static ulong BitcionNodeId { get { return s_Instance._BitcoinNodeId; } }
+        public static int NumConnections { get { return s_Instance._Connections.Count; } }
         #endregion
 
 
@@ -94,18 +95,18 @@ namespace BtcLib
         List<BtcSocket> _Connections;
 
         BtcNetwork()
-        {            
+        {
             Random r = new Random();
             _BitcoinNodeId = ((ulong)r.Next() << 32) | ((ulong)r.Next());
             _Connections = new List<BtcSocket>();
             _PossiblePeers = new Queue<string>(BitcoinSeeds);
             _SpiderThread = new Thread(new ThreadStart(SpiderThreadProcedure)) { Name = "SpiderThread" };
             _SpiderThread.Start();
-            
+
         }
 
         void SpiderThreadProcedure()
-        {            
+        {
             while (true)
             {
                 // Try to connect to any possible peers
@@ -150,9 +151,9 @@ namespace BtcLib
                 case InventoryType.Block: BtcBlockChain.AddKnownBlock(hash); break;
                 case InventoryType.Transaction: break;
                 default:
-                    Console.WriteLine("Unhandled inventory type: " + type);
+                    BtcLog.Print("Unhandled inventory type: " + type);
                     break;
-            }            
+            }
         }
 
         private void Socket_OnNodeDiscovered(BtcSocket arg1, BtcNetworkAddress arg2)
