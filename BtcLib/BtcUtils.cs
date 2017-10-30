@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace BtcLib
 {
@@ -45,6 +46,55 @@ namespace BtcLib
 
                 Console.WriteLine("");
             }
+        }
+
+        public static long ReadVarInt(BinaryReader br)
+        {
+            byte b = br.ReadByte();
+            switch (b)
+            {
+                case 0xFD: return (long)br.ReadInt16();
+                case 0xFE: return (long)br.ReadInt32();
+                case 0xFF: return (long)br.ReadInt64();
+                default: return (long)b;
+            }
+        }
+
+        public static string ReadVarString(BinaryReader br)
+        {
+            long len = ReadVarInt(br);
+            byte[] bytes = br.ReadBytes((int)len);
+            return Encoding.ASCII.GetString(bytes);
+        }
+
+        public static int[] ReadIntSet(BinaryReader br)
+        {
+            long count = ReadVarInt(br);
+            int[] set = new int[count];
+            for (long i = 0; i < count; i++)
+            {
+                set[i] = br.ReadInt32();
+            }
+            return set;
+        }
+
+        public static string[] ReadStringSet(BinaryReader br)
+        {
+            long count = ReadVarInt(br);
+            string[] set = new string[count];
+            for (long i = 0; i < count; i++)
+            {
+                set[i] = ReadVarString(br);
+            }
+            return set;
+        }
+
+        public static string BytesToString(byte[] bytes)
+        {
+            string str = "0x";
+            foreach (byte b in bytes)
+                str += b.ToString("X2");
+            return str;
         }
     }
 }

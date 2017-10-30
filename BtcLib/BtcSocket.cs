@@ -13,12 +13,13 @@ namespace BtcLib
     class BtcSocket
     {
         const uint MainNetworkID = 0xD9B4BEF9;
-        const uint ProtocolVersion = 60002;
+        const uint ProtocolVersion = 70015;
         const ulong NetworkServices = 1;    // For now only supporting NODE_NETWORK
         Socket _socket;
         bool _verrified;
         byte[] _pendingData;
         int _pendingDataOffset;
+        string _remoteHost;
 
         public uint RemoteProtocolVersion { get; private set; }
         public ulong RemoteServices { get; private set; }
@@ -27,16 +28,20 @@ namespace BtcLib
         public int RemoteBlockHeight { get; private set; }
 
         public event Action<BtcSocket, BtcNetworkAddress> OnNodeDiscovered;
+        public event Action<BtcSocket, BtcNetwork.InventoryType, byte[]> OnInventory;
 
         public BtcSocket()
         {
             _pendingData = new byte[1024 * 4];
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
+            _socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, false);
         }
 
         public bool Connect(string remoteHost, int remotePort)
         {
             // Connect to the host
+            //Console.WriteLine("Connecting to: " + remoteHost + ":" + remotePort);
+            _remoteHost = remoteHost;
             _socket.Connect(remoteHost, remotePort);
             if (!_socket.Connected)
                 return false;
@@ -53,7 +58,8 @@ namespace BtcLib
             }
 
             // Request all other nodes that the remote side knows about
-            SendPacket("getaddr", new byte[0]);
+            if (_socket.Connected)
+                SendPacket("getaddr", new byte[0]);
 
 
             return _socket.Connected;
@@ -80,6 +86,27 @@ namespace BtcLib
             }
 
             return true;
+        }
+
+        public bool IsAddress(BtcNetworkAddress address)
+        {
+            IPEndPoint ep = (IPEndPoint)_socket.RemoteEndPoint;
+            byte[] remoteBytes = ep.Address.GetAddressBytes();
+            if (remoteBytes.Length == 16)
+            {
+                bool match = true;
+                byte[] testBytes = address.GetIPv6Bytes();
+                for (int i = 0; i < remoteBytes.Length; i++)
+                {
+                    if (testBytes[i] != remoteBytes[i])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                return match;
+            }
+            return false;
         }
 
         #region Packet Processing
@@ -137,13 +164,18 @@ namespace BtcLib
 
         void ProcessCommand(string command, byte[] payload)
         {
-            Console.WriteLine("ProcessCommand: " + command);
+            //Console.WriteLine("ProcessCommand: " + command);
 
             switch (command)
             {
                 case "version": ProcessVersion(payload); break;
                 case "verack": ProcessVerack(); break;
                 case "addr": ProcessAddr(payload); break;
+                case "ping": ProcessPing(payload); break;
+                case "alert": ProcessAlert(payload); break;
+                case "getheaders": ProcessGetHeaders(payload); break;
+                case "inv": ProcessInv(payload); break;
+                case "encinit": ProcessEncInit(payload); break;
                 default:
                     Console.WriteLine("ProcessCommand - Unhandled command: " + command);
                     break;
@@ -163,9 +195,7 @@ namespace BtcLib
 
             ulong nodeId = br.ReadUInt64();
 
-            byte svl = br.ReadByte();
-            byte[] sv = br.ReadBytes(svl);
-            RemoteSubVersion = Encoding.ASCII.GetString(sv);
+            RemoteSubVersion = BtcUtils.ReadVarString(br);
             RemoteBlockHeight = br.ReadInt32();
         }
 
@@ -185,6 +215,58 @@ namespace BtcLib
                 BtcNetworkAddress addr = BtcNetworkAddress.Read(br, true);
                 OnNodeDiscovered?.Invoke(this, addr);
             }
+        }
+
+        void ProcessPing(byte[] data)
+        {
+            SendPacket("pong", data);
+        }
+
+        void ProcessAlert(byte[] data)
+        {
+        }
+
+        void ProcessGetHeaders(byte[] data)
+        {
+            BinaryReader br = new BinaryReader(new MemoryStream(data));
+            int version = br.ReadInt32();
+            long count = BtcUtils.ReadVarInt(br);
+
+            List<byte[]> hashes = new List<byte[]>();
+            for (long i = 0; i <= count; i++)
+            {
+                byte[] b = br.ReadBytes(32);
+                hashes.Add(b);
+            }
+
+            Console.WriteLine("Recieved getheaders but not currently doing anything with it");
+
+        }
+
+        void ProcessInv(byte[] data)
+        {
+            if (OnInventory != null)
+            {
+                BinaryReader br = new BinaryReader(new MemoryStream(data));
+                long count = BtcUtils.ReadVarInt(br);
+                for (long i = 0; i < count; i++)
+                {
+                    int type = br.ReadInt32();
+                    byte[] hash = br.ReadBytes(32);
+                    OnInventory.Invoke(this, (BtcNetwork.InventoryType)type, hash);
+                }
+            }
+        }
+
+        void ProcessEncInit(byte[] data)
+        {
+            BinaryReader br = new BinaryReader(new MemoryStream(data));
+
+            byte[] remotePubKey = br.ReadBytes(33);
+            byte cypherType = br.ReadByte();
+
+            Console.WriteLine("encinit receivied from remote host {0}, not supported", _remoteHost);
+            _socket.Close();            
         }
         #endregion
 
@@ -228,7 +310,7 @@ namespace BtcLib
             bw.Write(payload);
 
             byte[] packetData = ms.ToArray();
-            BtcUtils.PrintBytes(packetData);
+            //BtcUtils.PrintBytes(packetData);
             _socket.Send(packetData);
             bw.Close();
         }
@@ -255,49 +337,6 @@ namespace BtcLib
 
             SendPacket("version", ms.ToArray());
             bw.Close();
-        }
-
-
-
-        public static bool operator ==(BtcSocket socket, BtcNetworkAddress address)
-        {
-            IPEndPoint ep = (IPEndPoint)socket._socket.RemoteEndPoint;
-            byte[] remoteBytes = ep.Address.GetAddressBytes();
-            if (ep.AddressFamily == AddressFamily.InterNetworkV6)
-            {
-                byte[] testBytes = address.GetIPv6Bytes();
-                bool match = true;
-                for (int i = 0; i < 12; i++)
-                {
-                    if (remoteBytes[i] != testBytes[i])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-                return match;
-            }
-            else
-            {
-
-                byte[] testBytes = address.GetIPv4Bytes();
-                bool match = true;
-                for (int i = 0; i < 4; i++)
-                {
-                    if (remoteBytes[i] != testBytes[i])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-                return match;
-            }
-            return true;
-        }
-
-        public static bool operator !=(BtcSocket socket, BtcNetworkAddress address)
-        {
-            return !(socket == address);
         }
     }
 
@@ -330,6 +369,11 @@ namespace BtcLib
             return _ipAddress;
         }
 
+        public override string ToString()
+        {
+            return string.Format("{0}.{1}.{2}.{3}", _ipAddress[12], _ipAddress[13], _ipAddress[14], _ipAddress[15]);
+        }
+
         public void Write(BinaryWriter bw, bool inlcudeTimeStamp)
         {
             if (inlcudeTimeStamp)
@@ -351,3 +395,25 @@ namespace BtcLib
         }
     }
 }
+
+/*
+f9 be b4 d9 67 65 74 61 64 64 72 00 00 00 00 00 00 00 00 00 5d f6 e0 e2
+*/
+
+
+/*
+int readPoly(int coeff[], int degree);
+The caller will pass in a polynomial(array of coefficients) and the maximum degree allowed for that polynomial.
+Recall that an n-degree polynomial has n+1 coefficients.  (So the second argument is not the size of the array – it’s the maximum index that can be used with that array.)  
+The initial values in the coeff array are unknown.
+
+This function will read a properly-formatted text polynomial from the standard input stream, and record the coefficients into the proper locations in the array.
+If the degree is too large, the function returns 1 and fills the array with zeroes.  
+Otherwise, the function returns 0 to indicate success.
+Follow exactly the text representation described earlier in this specification.
+There may be one or more whitespace characters (space, tab, linefeed) before the polynomial begins, which must be ignored.  
+You may assume the polynomial ends with a linefeed (‘\n’). 
+If desired, the ungetc function can be used to place any such character back onto the standard input stream(stdout).
+
+    x^2 + 3x + 1
+*/

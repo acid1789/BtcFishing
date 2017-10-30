@@ -10,6 +10,11 @@ namespace BtcLib
     {
         #region Public Static Interface
         public static uint Height { get { return 0; } }
+
+        public static void AddKnownBlock(byte[] blockHash)
+        {
+            Console.WriteLine("AddKnownBlock: " + BtcUtils.BytesToString(blockHash));
+        }
         #endregion
 
         #region Private Interface
