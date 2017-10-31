@@ -48,6 +48,27 @@ namespace BtcLib
             }
         }
 
+        public static void WriteVarInt(BinaryWriter bw, long val)
+        {
+            if (val < 0xFD)
+                bw.Write((byte)val);
+            else if (val < 0xFFFF)
+            {
+                bw.Write((byte)0xFD);
+                bw.Write((ushort)val);
+            }
+            else if (val < 0xFFFFFFFF)
+            {
+                bw.Write((byte)0xFE);
+                bw.Write((uint)val);
+            }
+            else
+            {
+                bw.Write((byte)0xFF);
+                bw.Write(val);
+            }
+        }
+
         public static long ReadVarInt(BinaryReader br)
         {
             byte b = br.ReadByte();

@@ -21,6 +21,7 @@ namespace BtcFishingUI
             _logger = new UILogger();
             _logger.OnLogString += _logger_OnLogString;
 
+            BtcLib.BtcBlockChain.Initialize();
             BtcLib.BtcNetwork.Initialize();
         }
 
@@ -34,8 +35,12 @@ namespace BtcFishingUI
 
         private void timer1_Tick(object sender, EventArgs e)
         {
-            lblConnections.Text = BtcLib.BtcNetwork.NumConnections.ToString();
-            lblBlocks.Text = string.Format("Blocks {0} / {1}", BtcLib.BtcBlockChain.LocalBlocks, BtcLib.BtcBlockChain.KnownBlocks);
+            try
+            {
+                lblConnections.Text = BtcLib.BtcNetwork.NumConnections.ToString();
+                lblBlocks.Text = string.Format("Blocks {0} / {1}", BtcLib.BtcBlockChain.Height, BtcLib.BtcBlockChain.KnownHeight);
+            }
+            catch (Exception) { }
         }
     }
 }

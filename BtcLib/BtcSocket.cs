@@ -12,6 +12,7 @@ namespace BtcLib
 {
     class BtcSocket
     {
+        static readonly byte[] OriginBlockHash = { 0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72, 0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f, 0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c, 0x68, 0xd6, 0x19, 00, 00, 00, 00, 00 };
         const uint MainNetworkID = 0xD9B4BEF9;
         const uint ProtocolVersion = 70015;
         const ulong NetworkServices = 1;    // For now only supporting NODE_NETWORK
@@ -32,7 +33,7 @@ namespace BtcLib
 
         public BtcSocket()
         {
-            _pendingData = new byte[1024 * 4];
+            _pendingData = new byte[1024 * 1024];
             _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
             _socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, false);
         }
@@ -51,15 +52,25 @@ namespace BtcLib
 
             // Wait for version response
             _verrified = false;
+            DateTime start = DateTime.Now;
             while (!_verrified)
             {
                 if (!Update())
                     break;
+
+                if ((DateTime.Now - start).TotalSeconds > 2)
+                {
+                    _socket.Close();
+                    break;
+                }
             }
 
             // Request all other nodes that the remote side knows about
             if (_socket.Connected)
+            {
                 SendPacket("getaddr", new byte[0]);
+                SendGetHeadersPacket();
+            }
 
 
             return _socket.Connected;
@@ -108,7 +119,6 @@ namespace BtcLib
             }
             return false;
         }
-
         #region Packet Processing
         int ProcessPackets()
         {
@@ -336,6 +346,20 @@ namespace BtcLib
             bw.Write(BtcBlockChain.Height);
 
             SendPacket("version", ms.ToArray());
+            bw.Close();
+        }
+
+        public void SendGetHeadersPacket()
+        {
+            MemoryStream ms = new MemoryStream();
+            BinaryWriter bw = new BinaryWriter(ms);
+
+            bw.Write(RemoteProtocolVersion);
+            BtcUtils.WriteVarInt(bw, 1);
+            bw.Write(OriginBlockHash);
+            bw.Write(new byte[32]);
+
+            SendPacket("getheaders", ms.ToArray());
             bw.Close();
         }
     }

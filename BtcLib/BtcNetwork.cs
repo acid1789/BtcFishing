@@ -30,8 +30,14 @@ namespace BtcLib
             }
         }
 
+        public static void FetchHeaders()
+        {
+            s_Instance.InternalFetchHeaders();
+        }
+
         public static ulong BitcionNodeId { get { return s_Instance._BitcoinNodeId; } }
         public static int NumConnections { get { return s_Instance._Connections.Count; } }
+        public static int HigestHeight { get { return s_Instance._heighestHeight; } }
         #endregion
 
 
@@ -63,7 +69,6 @@ namespace BtcLib
                                     "178.254.34.161",
                                     "185.28.76.179",
                                     "192.203.228.71",
-                                    "180.200.128.58",
                                     "193.234.225.156",
                                     "202.55.87.45",
                                     "211.72.66.229",
@@ -94,8 +99,12 @@ namespace BtcLib
         Queue<string> _PossiblePeers;
         List<BtcSocket> _Connections;
 
+        int _heighestHeight;
+
         BtcNetwork()
         {
+            _heighestHeight = 0;
+
             Random r = new Random();
             _BitcoinNodeId = ((ulong)r.Next() << 32) | ((ulong)r.Next());
             _Connections = new List<BtcSocket>();
@@ -118,6 +127,8 @@ namespace BtcLib
                 {
                     if (!peer.Update())
                         remove.Add(peer);
+                    else if( peer.RemoteBlockHeight > _heighestHeight )
+                        _heighestHeight = peer.RemoteBlockHeight;
                 }
 
                 // Remove any dead connections
@@ -144,7 +155,7 @@ namespace BtcLib
             }
         }
 
-        private void Socket_OnInventory(BtcSocket socket, InventoryType type, byte[] hash)
+        void Socket_OnInventory(BtcSocket socket, InventoryType type, byte[] hash)
         {
             switch (type)
             {
@@ -156,7 +167,7 @@ namespace BtcLib
             }
         }
 
-        private void Socket_OnNodeDiscovered(BtcSocket arg1, BtcNetworkAddress arg2)
+        void Socket_OnNodeDiscovered(BtcSocket arg1, BtcNetworkAddress arg2)
         {
             // Check to see if this address is already in our connections list
             foreach (BtcSocket s in _Connections)
@@ -174,6 +185,11 @@ namespace BtcLib
 
             // Still here? Add this to the potential queue
             _PossiblePeers.Enqueue(arg2.ToString());
+        }
+
+        void InternalFetchHeaders()
+        {
+            //_Connections[0].FetchHeaders();
         }
         #endregion
 
