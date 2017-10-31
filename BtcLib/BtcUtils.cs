@@ -4,11 +4,32 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace BtcLib
 {
     public class BtcUtils
     {
+        public static byte[] Sha256(byte[] input)
+        {
+            SHA256 sha256 = SHA256Managed.Create();
+            byte[] hash = sha256.ComputeHash(input);
+            return hash;
+        }
+
+        public static bool HashEquals(byte[] hashA, byte[] hashB)
+        {
+            if (hashA.Length != hashB.Length)
+                return false;
+
+            for (int i = 0; i < hashA.Length; i++)
+            {
+                if (hashA[i] != hashB[i])
+                    return false;
+            }
+            return true;
+        }
+
         public static ulong UnixTime { get { return (ulong)(DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1))).TotalSeconds; } }
 
         public static void PrintBytes(byte[] data, int length = -1)

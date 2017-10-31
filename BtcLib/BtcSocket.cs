@@ -12,7 +12,7 @@ namespace BtcLib
 {
     class BtcSocket
     {
-        static readonly byte[] OriginBlockHash = { 0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72, 0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f, 0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c, 0x68, 0xd6, 0x19, 00, 00, 00, 00, 00 };
+        public static readonly byte[] OriginBlockHash = { 0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72, 0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f, 0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c, 0x68, 0xd6, 0x19, 00, 00, 00, 00, 00 };
         const uint MainNetworkID = 0xD9B4BEF9;
         const uint ProtocolVersion = 70015;
         const ulong NetworkServices = 1;    // For now only supporting NODE_NETWORK
@@ -21,7 +21,9 @@ namespace BtcLib
         byte[] _pendingData;
         int _pendingDataOffset;
         string _remoteHost;
+        int _score;
 
+        public string RemoteHost { get { return _remoteHost; } }
         public uint RemoteProtocolVersion { get; private set; }
         public ulong RemoteServices { get; private set; }
         public ulong RemoteTimeStamp { get; private set; }
@@ -30,6 +32,7 @@ namespace BtcLib
 
         public event Action<BtcSocket, BtcNetworkAddress> OnNodeDiscovered;
         public event Action<BtcSocket, BtcNetwork.InventoryType, byte[]> OnInventory;
+        public event Action<BtcSocket, BtcBlockHeader> OnHeader;
 
         public BtcSocket()
         {
@@ -43,7 +46,16 @@ namespace BtcLib
             // Connect to the host
             //BtcLog.Print("Connecting to: " + remoteHost + ":" + remotePort);
             _remoteHost = remoteHost;
-            _socket.Connect(remoteHost, remotePort);
+            try
+            {
+                IAsyncResult ares = _socket.BeginConnect(remoteHost, remotePort, null, null);
+                bool success = ares.AsyncWaitHandle.WaitOne(5000, true);
+                if (success)
+                    _socket.EndConnect(ares);
+                else
+                    throw new Exception("Connection Timed Out");
+            }
+            catch (Exception) { return false; }
             if (!_socket.Connected)
                 return false;
 
@@ -69,7 +81,6 @@ namespace BtcLib
             if (_socket.Connected)
             {
                 SendPacket("getaddr", new byte[0]);
-                SendGetHeadersPacket();
             }
 
 
@@ -83,7 +94,10 @@ namespace BtcLib
 
             if (_socket.Available > 0)
             {
-                int bytesRead = _socket.Receive(_pendingData, _pendingDataOffset, _pendingData.Length - _pendingDataOffset, SocketFlags.None);
+                int spaceRemaining = _pendingData.Length - _pendingDataOffset;
+                if (spaceRemaining < _socket.Available)
+                    throw new Exception("Not Enoguh space in socket read buffer");
+                int bytesRead = _socket.Receive(_pendingData, _pendingDataOffset, spaceRemaining, SocketFlags.None);
                 _pendingDataOffset += bytesRead;
             }
 
@@ -119,6 +133,10 @@ namespace BtcLib
             }
             return false;
         }
+
+        public int Score { get { return _score; } } 
+        public void IncrementScore() { _score++; }
+        public void DecrementScore() { _score--; }
         #region Packet Processing
         int ProcessPackets()
         {
@@ -184,6 +202,7 @@ namespace BtcLib
                 case "ping": ProcessPing(payload); break;
                 case "alert": ProcessAlert(payload); break;
                 case "getheaders": ProcessGetHeaders(payload); break;
+                case "headers": ProcessGetHeaders(payload); break;
                 case "inv": ProcessInv(payload); break;
                 case "encinit": ProcessEncInit(payload); break;
                 default:
@@ -251,6 +270,21 @@ namespace BtcLib
 
             BtcLog.Print("Recieved getheaders but not currently doing anything with it");
 
+        }
+
+        void ProcessHeaders(byte[] data)
+        {
+            IncrementScore();
+            BinaryReader br = new BinaryReader(new MemoryStream(data));
+
+            long count = BtcUtils.ReadVarInt(br);
+            for (long i = 0; i < count; i++)
+            {
+                BtcBlockHeader header = new BtcBlockHeader(br);
+                OnHeader?.Invoke(this, header);
+            }
+
+            br.Close();
         }
 
         void ProcessInv(byte[] data)
@@ -321,7 +355,11 @@ namespace BtcLib
 
             byte[] packetData = ms.ToArray();
             //BtcUtils.PrintBytes(packetData);
-            _socket.Send(packetData);
+            try
+            {
+                _socket.Send(packetData);
+            }
+            catch (Exception) { }
             bw.Close();
         }
 
@@ -420,24 +458,3 @@ namespace BtcLib
     }
 }
 
-/*
-f9 be b4 d9 67 65 74 61 64 64 72 00 00 00 00 00 00 00 00 00 5d f6 e0 e2
-*/
-
-
-/*
-int readPoly(int coeff[], int degree);
-The caller will pass in a polynomial(array of coefficients) and the maximum degree allowed for that polynomial.
-Recall that an n-degree polynomial has n+1 coefficients.  (So the second argument is not the size of the array – it’s the maximum index that can be used with that array.)  
-The initial values in the coeff array are unknown.
-
-This function will read a properly-formatted text polynomial from the standard input stream, and record the coefficients into the proper locations in the array.
-If the degree is too large, the function returns 1 and fills the array with zeroes.  
-Otherwise, the function returns 0 to indicate success.
-Follow exactly the text representation described earlier in this specification.
-There may be one or more whitespace characters (space, tab, linefeed) before the polynomial begins, which must be ignored.  
-You may assume the polynomial ends with a linefeed (‘\n’). 
-If desired, the ungetc function can be used to place any such character back onto the standard input stream(stdout).
-
-    x^2 + 3x + 1
-*/

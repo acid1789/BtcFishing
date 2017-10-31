@@ -37,7 +37,7 @@ namespace BtcLib
 
         public static ulong BitcionNodeId { get { return s_Instance._BitcoinNodeId; } }
         public static int NumConnections { get { return s_Instance._Connections.Count; } }
-        public static int HigestHeight { get { return s_Instance._heighestHeight; } }
+        public static int HighestHeight { get { return s_Instance._highestHeight; } }
         #endregion
 
 
@@ -96,22 +96,33 @@ namespace BtcLib
 
         ulong _BitcoinNodeId;
         Thread _SpiderThread;
+        Thread _NetworkThread;
         Queue<string> _PossiblePeers;
+        Mutex _PossiblePeerLock;
+
+        Mutex _ConnectionsLock;
         List<BtcSocket> _Connections;
 
-        int _heighestHeight;
+        int _highestHeight;
+        BtcSocket _highestHost;
+        DateTime _headersRequestedTime;
+        bool _waitingForHeaders;
 
         BtcNetwork()
         {
-            _heighestHeight = 0;
+            _highestHeight = 0;
 
             Random r = new Random();
             _BitcoinNodeId = ((ulong)r.Next() << 32) | ((ulong)r.Next());
+            _ConnectionsLock = new Mutex();
             _Connections = new List<BtcSocket>();
             _PossiblePeers = new Queue<string>(BitcoinSeeds);
+            _PossiblePeerLock = new Mutex();
             _SpiderThread = new Thread(new ThreadStart(SpiderThreadProcedure)) { Name = "SpiderThread" };
             _SpiderThread.Start();
-
+            
+            _NetworkThread = new Thread(new ThreadStart(NetworkThreadProcedure)) { Name = "Network Thread" };
+            _NetworkThread.Start();
         }
 
         void SpiderThreadProcedure()
@@ -119,40 +130,87 @@ namespace BtcLib
             while (true)
             {
                 // Try to connect to any possible peers
-                ConnectToPeer();
-
-                // Update all existing connections
-                List<BtcSocket> remove = new List<BtcSocket>();
-                foreach (BtcSocket peer in _Connections)
+                if (_PossiblePeers.Count > 0)
                 {
-                    if (!peer.Update())
-                        remove.Add(peer);
-                    else if( peer.RemoteBlockHeight > _heighestHeight )
-                        _heighestHeight = peer.RemoteBlockHeight;
+                    _PossiblePeerLock.WaitOne();
+                    string peer = _PossiblePeers.Dequeue();
+                    _PossiblePeerLock.ReleaseMutex();
+                    BtcSocket socket = new BtcSocket();
+                    if (socket.Connect(peer, BitcoinPort))
+                    {
+                        socket.OnNodeDiscovered += Socket_OnNodeDiscovered;
+                        socket.OnInventory += Socket_OnInventory;
+                        socket.OnHeader += Socket_OnHeader;
+                        _ConnectionsLock.WaitOne();
+                        _Connections.Add(socket);
+                        _ConnectionsLock.ReleaseMutex();
+                    }
                 }
-
-                // Remove any dead connections
-                foreach (BtcSocket r in remove)
-                    _Connections.Remove(r);
-
 
                 Thread.Sleep(50);
             }
         }
 
-        void ConnectToPeer()
+        void NetworkThreadProcedure()
         {
-            if (_PossiblePeers.Count > 0)
+            while (true)
             {
-                string peer = _PossiblePeers.Dequeue();
-                BtcSocket socket = new BtcSocket();
-                if (socket.Connect(peer, BitcoinPort))
+                // Update all existing connections
+                _ConnectionsLock.WaitOne();
+                List<BtcSocket> remove = new List<BtcSocket>();
+                foreach (BtcSocket peer in _Connections)
                 {
-                    socket.OnNodeDiscovered += Socket_OnNodeDiscovered;
-                    socket.OnInventory += Socket_OnInventory;
-                    _Connections.Add(socket);
+                    if (!peer.Update())
+                        remove.Add(peer);
+                    else if (peer.RemoteBlockHeight >= _highestHeight)
+                    {
+                        if (_highestHost == null || peer.Score > _highestHost.Score)
+                        {
+                            _highestHeight = peer.RemoteBlockHeight;
+                            _highestHost = peer;
+                        }
+                    }
+                }
+
+                // Remove any dead connections
+                foreach (BtcSocket r in remove)
+                    _Connections.Remove(r);
+                _ConnectionsLock.ReleaseMutex();
+
+                UpdateHeaders();
+            }
+        }
+
+        void UpdateHeaders()
+        {
+            TimeSpan ts = DateTime.Now - _headersRequestedTime;
+            if (ts.TotalSeconds < 3)
+            {
+                // Requested headers less than 15 seconds ago, wait
+            }
+            else
+            {
+                // Last header request was a while ago
+                if (_waitingForHeaders)
+                {
+                    BtcLog.Print("Timed out waiting for headers from: " + _highestHost.RemoteHost);
+                    _waitingForHeaders = false;
+                    _highestHost.DecrementScore();
+                }
+                else if (BtcBlockChain.KnownHeight < _highestHeight)
+                {
+                    // There are still headers to fetch
+                    BtcLog.Print("Requesting headers from: " + _highestHost.RemoteHost);
+                    _highestHost.SendGetHeadersPacket();
+                    _headersRequestedTime = DateTime.Now;
+                    _waitingForHeaders = true;
                 }
             }
+        }
+        
+        private void Socket_OnHeader(BtcSocket arg1, BtcBlockHeader arg2)
+        {
+            BtcBlockChain.AddBlockHeader(arg2);
         }
 
         void Socket_OnInventory(BtcSocket socket, InventoryType type, byte[] hash)
@@ -177,14 +235,19 @@ namespace BtcLib
             }
 
             // Check to see if this is in the potentials list
+            _PossiblePeerLock.WaitOne();
             foreach (string potential in _PossiblePeers)
             {
                 if (potential == arg2.ToString())
+                {
+                    _PossiblePeerLock.ReleaseMutex();
                     return; // Already in the list to connect to
+                }
             }
 
             // Still here? Add this to the potential queue
             _PossiblePeers.Enqueue(arg2.ToString());
+            _PossiblePeerLock.ReleaseMutex();
         }
 
         void InternalFetchHeaders()
