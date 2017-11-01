@@ -30,7 +30,8 @@ namespace BtcFishingUI
             if (InvokeRequired)
                 Invoke((MethodInvoker)delegate { _logger_OnLogString(obj); });
             else
-                tbOutput.Text += obj + "\r\n";
+                tbOutput.AppendText(obj + "\r\n");
+            
         }
 
         private void timer1_Tick(object sender, EventArgs e)
@@ -38,6 +39,7 @@ namespace BtcFishingUI
             try
             {
                 lblConnections.Text = BtcLib.BtcNetwork.NumConnections.ToString();
+                lblPotentials.Text = BtcLib.BtcNetwork.NumPotentialConnections.ToString();
                 lblBlocks.Text = string.Format("Blocks {0} / {1}", BtcLib.BtcBlockChain.Height, BtcLib.BtcBlockChain.KnownHeight);
             }
             catch (Exception) { }

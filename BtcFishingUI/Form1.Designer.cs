@@ -34,6 +34,8 @@
             this.tbOutput = new System.Windows.Forms.TextBox();
             this.timer1 = new System.Windows.Forms.Timer(this.components);
             this.lblBlocks = new System.Windows.Forms.Label();
+            this.label2 = new System.Windows.Forms.Label();
+            this.lblPotentials = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // label1
@@ -48,7 +50,7 @@
             // lblConnections
             // 
             this.lblConnections.AutoSize = true;
-            this.lblConnections.Location = new System.Drawing.Point(87, 9);
+            this.lblConnections.Location = new System.Drawing.Point(83, 9);
             this.lblConnections.Name = "lblConnections";
             this.lblConnections.Size = new System.Drawing.Size(13, 13);
             this.lblConnections.TabIndex = 1;
@@ -79,11 +81,31 @@
             this.lblBlocks.Text = "blocks 2323/23";
             this.lblBlocks.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(118, 9);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(81, 13);
+            this.label2.TabIndex = 4;
+            this.label2.Text = "Potential Peers:";
+            // 
+            // lblPotentials
+            // 
+            this.lblPotentials.AutoSize = true;
+            this.lblPotentials.Location = new System.Drawing.Point(205, 9);
+            this.lblPotentials.Name = "lblPotentials";
+            this.lblPotentials.Size = new System.Drawing.Size(63, 13);
+            this.lblPotentials.TabIndex = 5;
+            this.lblPotentials.Text = "lblPotentials";
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(862, 522);
+            this.Controls.Add(this.lblPotentials);
+            this.Controls.Add(this.label2);
             this.Controls.Add(this.lblBlocks);
             this.Controls.Add(this.tbOutput);
             this.Controls.Add(this.lblConnections);
@@ -102,6 +124,8 @@
         private System.Windows.Forms.TextBox tbOutput;
         private System.Windows.Forms.Timer timer1;
         private System.Windows.Forms.Label lblBlocks;
+        private System.Windows.Forms.Label label2;
+        private System.Windows.Forms.Label lblPotentials;
     }
 }
 

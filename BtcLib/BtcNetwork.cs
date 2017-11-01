@@ -37,6 +37,7 @@ namespace BtcLib
 
         public static ulong BitcionNodeId { get { return s_Instance._BitcoinNodeId; } }
         public static int NumConnections { get { return s_Instance._Connections.Count; } }
+        public static int NumPotentialConnections { get { return s_Instance._PossiblePeers.Count; } }
         public static int HighestHeight { get { return s_Instance._highestHeight; } }
         #endregion
 
@@ -97,6 +98,7 @@ namespace BtcLib
         ulong _BitcoinNodeId;
         Thread _SpiderThread;
         Thread _NetworkThread;
+        Dictionary<string, bool> _BadHosts;
         Queue<string> _PossiblePeers;
         Mutex _PossiblePeerLock;
 
@@ -111,6 +113,7 @@ namespace BtcLib
         BtcNetwork()
         {
             _highestHeight = 0;
+            _BadHosts = new Dictionary<string, bool>();
 
             Random r = new Random();
             _BitcoinNodeId = ((ulong)r.Next() << 32) | ((ulong)r.Next());
@@ -135,6 +138,8 @@ namespace BtcLib
                     _PossiblePeerLock.WaitOne();
                     string peer = _PossiblePeers.Dequeue();
                     _PossiblePeerLock.ReleaseMutex();
+                    if (_BadHosts.ContainsKey(peer))
+                        continue;
                     BtcSocket socket = new BtcSocket();
                     if (socket.Connect(peer, BitcoinPort))
                     {
@@ -145,6 +150,8 @@ namespace BtcLib
                         _Connections.Add(socket);
                         _ConnectionsLock.ReleaseMutex();
                     }
+                    else
+                        _BadHosts[peer] = true;
                 }
 
                 Thread.Sleep(50);
@@ -227,6 +234,10 @@ namespace BtcLib
 
         void Socket_OnNodeDiscovered(BtcSocket arg1, BtcNetworkAddress arg2)
         {
+            string incommingIp = arg2.ToString();
+            if (_BadHosts.ContainsKey(incommingIp))
+                return;
+
             // Check to see if this address is already in our connections list
             foreach (BtcSocket s in _Connections)
             {
@@ -234,11 +245,11 @@ namespace BtcLib
                     return; // Already connected to this peer
             }
 
-            // Check to see if this is in the potentials list
+            // Check to see if this is in the potentials list            
             _PossiblePeerLock.WaitOne();
             foreach (string potential in _PossiblePeers)
             {
-                if (potential == arg2.ToString())
+                if (potential == incommingIp)
                 {
                     _PossiblePeerLock.ReleaseMutex();
                     return; // Already in the list to connect to
@@ -246,7 +257,7 @@ namespace BtcLib
             }
 
             // Still here? Add this to the potential queue
-            _PossiblePeers.Enqueue(arg2.ToString());
+            _PossiblePeers.Enqueue(incommingIp);
             _PossiblePeerLock.ReleaseMutex();
         }
 

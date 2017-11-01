@@ -49,7 +49,7 @@ namespace BtcLib
             try
             {
                 IAsyncResult ares = _socket.BeginConnect(remoteHost, remotePort, null, null);
-                bool success = ares.AsyncWaitHandle.WaitOne(5000, true);
+                bool success = ares.AsyncWaitHandle.WaitOne(2000, true);
                 if (success)
                     _socket.EndConnect(ares);
                 else
@@ -202,7 +202,7 @@ namespace BtcLib
                 case "ping": ProcessPing(payload); break;
                 case "alert": ProcessAlert(payload); break;
                 case "getheaders": ProcessGetHeaders(payload); break;
-                case "headers": ProcessGetHeaders(payload); break;
+                case "headers": ProcessHeaders(payload); break;
                 case "inv": ProcessInv(payload); break;
                 case "encinit": ProcessEncInit(payload); break;
                 default:
@@ -238,7 +238,7 @@ namespace BtcLib
             MemoryStream ms = new MemoryStream(data);
             BinaryReader br = new BinaryReader(ms);
 
-            byte count = br.ReadByte();
+            long count = BtcUtils.ReadVarInt(br);
             for (int i = 0; i < count; i++)
             {
                 BtcNetworkAddress addr = BtcNetworkAddress.Read(br, true);
@@ -261,11 +261,13 @@ namespace BtcLib
             int version = br.ReadInt32();
             long count = BtcUtils.ReadVarInt(br);
 
+            //BtcLog.Print("getheaders:");
             List<byte[]> hashes = new List<byte[]>();
             for (long i = 0; i <= count; i++)
             {
                 byte[] b = br.ReadBytes(32);
                 hashes.Add(b);
+                //BtcLog.Print("\t" + BtcUtils.BytesToString(b));
             }
 
             BtcLog.Print("Recieved getheaders but not currently doing anything with it");
