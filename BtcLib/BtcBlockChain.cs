@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.IO;
+using System.IO.Compression;
 
 namespace BtcLib
 {
@@ -46,14 +48,6 @@ namespace BtcLib
         #endregion
 
         #region Private Interface
-        enum BCState
-        {
-            Idle,
-            FetchingHeaders,
-            FetchingBlocks,
-        }
-
-        BCState _state;
         Thread _thread;
 
         uint _height;
@@ -62,6 +56,8 @@ namespace BtcLib
         List<BtcBlockHeader> _chainFragments;
         BtcBlockHeader _mainChain;
 
+        DateTime _lastDiskSync;
+
         BtcBlockChain()
         {
             _chainFragments = new List<BtcBlockHeader>();
@@ -69,8 +65,7 @@ namespace BtcLib
 
             _height = 0;
             _knownHeight = 0;
-
-            _state = BCState.Idle;
+            
             _thread = new Thread(new ThreadStart(BlockChainThreadProc)) { Name = "Block Chain Thread" };
             _thread.Start();
         }
@@ -79,28 +74,47 @@ namespace BtcLib
         {
             while (true)
             {
-                switch (_state)
-                {
-                    default:
-                    case BCState.Idle: UpdateIdle(); break;
-                    case BCState.FetchingHeaders: UpdateHeaders(); break;
-                    case BCState.FetchingBlocks: UpdateBlocks(); break;
-                }
+                if ((DateTime.Now - _lastDiskSync).TotalSeconds > 15)
+                    DoDiskSync();
+                
 
                 Thread.Sleep(100);
             }
         }
 
-        void UpdateIdle()
+        void DoDiskSync()
         {
-        }
+            const int HeadersPerArchive = 50000;
+            int archiveFiles = (int)(_knownHeight / HeadersPerArchive);
+            BtcBlockHeader iter = BtcBlockHeader.GenesisBlock;
+            int startBlock = 0;
+            while (archiveFiles > 0)
+            {
+                MemoryStream ms = new MemoryStream();
+                BinaryWriter bw = new BinaryWriter(ms);
 
-        void UpdateHeaders()
-        {
-        }
+                bool dirty = false;
+                for (int i = 0; i < HeadersPerArchive; i++)
+                {
+                    iter.Write(bw);
+                    if (iter.Dirty)
+                        dirty = true;
+                    iter = iter.Next;
+                }
 
-        void UpdateBlocks()
-        {
+                if (dirty)
+                {
+                    string archiveName = startBlock.ToString() + ".headers";
+                    FileStream fs = File.Create(archiveName);
+
+                    GZipStream zs = new GZipStream(fs, CompressionMode.Compress);
+                    ms.Seek(0, SeekOrigin.Begin);
+                    ms.CopyTo(zs);
+                    zs.Close();
+                }
+                archiveFiles--;
+                startBlock += HeadersPerArchive;
+            }
         }
 
         void AddHeader(BtcBlockHeader header)
