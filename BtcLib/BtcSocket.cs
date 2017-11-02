@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
 using System.IO;
-using System.Security.Cryptography;
 
 namespace BtcLib
 {
@@ -36,7 +35,7 @@ namespace BtcLib
 
         public BtcSocket()
         {
-            _pendingData = new byte[1024 * 1024];
+            _pendingData = new byte[1024 * 1024 * 3];
             _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
             _socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, false);
         }
@@ -276,6 +275,8 @@ namespace BtcLib
 
         void ProcessHeaders(byte[] data)
         {
+            BtcNetwork.HeaderFetchEnabled = false;
+
             IncrementScore();
             BinaryReader br = new BinaryReader(new MemoryStream(data));
 
@@ -287,6 +288,8 @@ namespace BtcLib
             }
 
             br.Close();
+            //BtcBlockChain.ReCount();
+            BtcNetwork.HeaderFetchEnabled = true;
         }
 
         void ProcessInv(byte[] data)
@@ -318,8 +321,7 @@ namespace BtcLib
 
         int GenerateChecksum(byte[] data)
         {
-            SHA256 sha256 = SHA256Managed.Create();
-            byte[] hash = sha256.ComputeHash(sha256.ComputeHash(data));
+            byte[] hash = BtcUtils.DSha256(data);
 
             int chk = hash[3] << 24 | hash[2] << 16 | hash[1] << 8 | hash[0];
             return chk;
@@ -396,7 +398,7 @@ namespace BtcLib
 
             bw.Write(RemoteProtocolVersion);
             BtcUtils.WriteVarInt(bw, 1);
-            bw.Write(OriginBlockHash);
+            bw.Write(BtcBlockChain.Tip.Hash);
             bw.Write(new byte[32]);
 
             SendPacket("getheaders", ms.ToArray());

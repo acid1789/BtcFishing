@@ -39,6 +39,7 @@ namespace BtcLib
         public static int NumConnections { get { return s_Instance._Connections.Count; } }
         public static int NumPotentialConnections { get { return s_Instance._PossiblePeers.Count; } }
         public static int HighestHeight { get { return s_Instance._highestHeight; } }
+        public static bool HeaderFetchEnabled { get; set; }
         #endregion
 
 
@@ -112,6 +113,7 @@ namespace BtcLib
 
         BtcNetwork()
         {
+            HeaderFetchEnabled = true;
             _highestHeight = 0;
             _BadHosts = new Dictionary<string, bool>();
 
@@ -123,7 +125,7 @@ namespace BtcLib
             _PossiblePeerLock = new Mutex();
             _SpiderThread = new Thread(new ThreadStart(SpiderThreadProcedure)) { Name = "SpiderThread" };
             _SpiderThread.Start();
-            
+
             _NetworkThread = new Thread(new ThreadStart(NetworkThreadProcedure)) { Name = "Network Thread" };
             _NetworkThread.Start();
         }
@@ -184,7 +186,8 @@ namespace BtcLib
                     _Connections.Remove(r);
                 _ConnectionsLock.ReleaseMutex();
 
-                UpdateHeaders();
+                if (HeaderFetchEnabled)
+                    UpdateHeaders();
             }
         }
 
@@ -214,7 +217,7 @@ namespace BtcLib
                 }
             }
         }
-        
+
         private void Socket_OnHeader(BtcSocket arg1, BtcBlockHeader arg2)
         {
             BtcBlockChain.AddBlockHeader(arg2);

@@ -12,6 +12,7 @@ namespace BtcLib
         static BtcBlockChain s_Instance;
         public static uint Height { get { return s_Instance._height; } }
         public static uint KnownHeight { get { return s_Instance._knownHeight; } }
+        public static BtcBlockHeader Tip { get { return s_Instance._mainChain; } }
 
         public static void Initialize()
         {
@@ -40,6 +41,8 @@ namespace BtcLib
         {
             s_Instance.AddHeader(header);
         }
+
+        public static void ReCount() { s_Instance.CountChain(); }
         #endregion
 
         #region Private Interface
@@ -62,7 +65,7 @@ namespace BtcLib
         BtcBlockChain()
         {
             _chainFragments = new List<BtcBlockHeader>();
-            _mainChain = null;
+            _mainChain = BtcBlockHeader.GenesisBlock;
 
             _height = 0;
             _knownHeight = 0;
@@ -102,54 +105,79 @@ namespace BtcLib
 
         void AddHeader(BtcBlockHeader header)
         {
-            if (_mainChain == null && BtcUtils.HashEquals(header.GetHash(), BtcSocket.OriginBlockHash))
-            {
-                // Found the origin block
-                _mainChain = header;
-            }
-
             // Link any other blocks we can
-            LinkBlocksTo(header);
-        }
-
-        void LinkBlocksTo(BtcBlockHeader block)
-        {
-            List<BtcBlockHeader> remove = new List<BtcBlockHeader>();
-            foreach (BtcBlockHeader fragment in _chainFragments)
+            if (_chainFragments.Count > 0)
             {
-                if (BtcUtils.HashEquals(fragment.GetHash(), block.PrevHash))
+                List<BtcBlockHeader> remove = new List<BtcBlockHeader>();
+                foreach (BtcBlockHeader fragment in _chainFragments)
                 {
-                    if (fragment.Next != null)
+                    if (BtcUtils.HashEquals(fragment.Hash, header.PrevHash))
                     {
-                        // Fragment already has a next block, but this new block is pointing to it as previous
-                        if (BtcUtils.HashEquals(fragment.Next.GetHash(), block.GetHash()))
+                        if (fragment.Next != null)
                         {
-                            // The new block is a duplicate of the existing block, just bail
-                            return;
+                            // Fragment already has a next block, but this new block is pointing to it as previous
+                            if (BtcUtils.HashEquals(fragment.Next.Hash, header.Hash))
+                            {
+                                // The new block is a duplicate of the existing block, just bail
+                                return;
+                            }
+                            else
+                            {
+                                // Both blocks point here, this is a problem!
+                                BtcLog.Print("Multiple blocks pointing to one parent block!");
+                            }
+
                         }
                         else
                         {
-                            // Both blocks point here, this is a problem!
-                            BtcLog.Print("Multiple blocks pointing to one parent block!");
+                            fragment.Next = header;
+                            header.Prev = fragment;
                         }
-
                     }
-                    else
+                    else if (BtcUtils.HashEquals(header.Hash, fragment.PrevHash))
                     {
-                        fragment.Next = block;
-                        block.Prev = fragment;
+                        header.Next = fragment;
+                        fragment.Prev = header;
+                        remove.Add(fragment);
                     }
                 }
-                else if (BtcUtils.HashEquals(block.GetHash(), fragment.PrevHash))
-                {
-                    block.Next = fragment;
-                    fragment.Prev = block;
-                    remove.Add(fragment);
-                }
+                foreach (BtcBlockHeader r in remove)
+                    _chainFragments.Remove(r);
             }
 
-            foreach (BtcBlockHeader r in remove)
-                _chainFragments.Remove(r);
+            // check the fragment against the main chain
+            if (BtcUtils.HashEquals(_mainChain.Hash, header.PrevHash))
+            {
+                // Attach here
+                _mainChain.Next = header;
+                header.Prev = _mainChain;
+
+                // Go to the end of the chain
+                while (_mainChain.Next != null)
+                    _mainChain = _mainChain.Next;
+
+                // Recount block numbers
+                _knownHeight++;
+            }
+            else
+            {
+                // Orphaned fragment, put it in the list for later
+                _chainFragments.Add(header);
+            }
+        }
+
+        void CountChain()
+        {
+            uint headers = 0;
+            
+            BtcBlockHeader iter = _mainChain;
+            while (iter.Prev != null)
+            {
+                headers++;
+                iter = iter.Prev;
+            }
+
+            _knownHeight = headers;
         }
         #endregion
     }
