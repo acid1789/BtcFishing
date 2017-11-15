@@ -44,6 +44,11 @@ namespace BtcLib
             s_Instance.AddHeader(header);
         }
 
+        public static BtcBlockHeader FindBlockHeader(byte[] hash)
+        {
+            return s_Instance.FindHeader(hash);
+        }
+
         public static void ReCount() { s_Instance.CountChain(); }
         #endregion
 
@@ -62,10 +67,10 @@ namespace BtcLib
         {
             _chainFragments = new List<BtcBlockHeader>();
             _mainChain = BtcBlockHeader.GenesisBlock;
-
             _height = 0;
             _knownHeight = 0;
-            
+            LoadHeaders();
+
             _thread = new Thread(new ThreadStart(BlockChainThreadProc)) { Name = "Block Chain Thread" };
             _thread.Start();
         }
@@ -74,7 +79,7 @@ namespace BtcLib
         {
             while (true)
             {
-                if ((DateTime.Now - _lastDiskSync).TotalSeconds > 15)
+                if ((DateTime.Now - _lastDiskSync).TotalSeconds > 10)
                     DoDiskSync();
                 
 
@@ -82,39 +87,53 @@ namespace BtcLib
             }
         }
 
+        void LoadHeaders()
+        {
+            FileStream fs = File.OpenRead("blocks.headers");
+            BinaryReader br = new BinaryReader(fs);
+
+            while (fs.Position < fs.Length)
+            {
+                BtcBlockHeader bh = new BtcBlockHeader(br);
+                AddHeader(bh);
+            }
+            br.Close();
+        }
+
         void DoDiskSync()
         {
-            const int HeadersPerArchive = 50000;
-            int archiveFiles = (int)(_knownHeight / HeadersPerArchive);
-            BtcBlockHeader iter = BtcBlockHeader.GenesisBlock;
-            int startBlock = 0;
-            while (archiveFiles > 0)
+            bool dirtyBlocks = false;
+            int blockIndex = 0;
+            BtcBlockHeader iter = BtcBlockHeader.GenesisBlock.Next;
+            while (iter != null)
             {
-                MemoryStream ms = new MemoryStream();
-                BinaryWriter bw = new BinaryWriter(ms);
+                if (iter.Dirty)
+                {
+                    dirtyBlocks = true;
+                    break;
+                }
+                iter = iter.Next;
+                blockIndex++;
+            }
 
-                bool dirty = false;
-                for (int i = 0; i < HeadersPerArchive; i++)
+            if (dirtyBlocks)
+            {
+                // At least one block is dirty, starting at iter
+                FileStream fs = File.OpenWrite("blocks.headers");
+                fs.Seek(blockIndex * 81, SeekOrigin.Begin);
+                BinaryWriter bw = new BinaryWriter(fs);
+
+                while (iter != null)
                 {
                     iter.Write(bw);
-                    if (iter.Dirty)
-                        dirty = true;
+                    iter.Dirty = false;
                     iter = iter.Next;
                 }
 
-                if (dirty)
-                {
-                    string archiveName = startBlock.ToString() + ".headers";
-                    FileStream fs = File.Create(archiveName);
-
-                    GZipStream zs = new GZipStream(fs, CompressionMode.Compress);
-                    ms.Seek(0, SeekOrigin.Begin);
-                    ms.CopyTo(zs);
-                    zs.Close();
-                }
-                archiveFiles--;
-                startBlock += HeadersPerArchive;
+                bw.Close();
             }
+            
+            _lastDiskSync = DateTime.Now;
         }
 
         void AddHeader(BtcBlockHeader header)
@@ -178,6 +197,18 @@ namespace BtcLib
                 // Orphaned fragment, put it in the list for later
                 _chainFragments.Add(header);
             }
+        }
+
+        BtcBlockHeader FindHeader(byte[] hash)
+        {
+            BtcBlockHeader iter = _mainChain;
+            while (iter != null)
+            {
+                if (BtcUtils.HashEquals(hash, iter.Hash))
+                    return iter;
+                iter = iter.Prev;
+            }
+            return null;
         }
 
         void CountChain()

@@ -256,21 +256,51 @@ namespace BtcLib
 
         void ProcessGetHeaders(byte[] data)
         {
+            //DateTime start = DateTime.Now;
+
             BinaryReader br = new BinaryReader(new MemoryStream(data));
             int version = br.ReadInt32();
             long count = BtcUtils.ReadVarInt(br);
 
-            //BtcLog.Print("getheaders:");
+            //BtcLog.Print("getheaders: " + count);
             List<byte[]> hashes = new List<byte[]>();
-            for (long i = 0; i <= count; i++)
+            for (long i = 0; i < count; i++)
             {
                 byte[] b = br.ReadBytes(32);
                 hashes.Add(b);
                 //BtcLog.Print("\t" + BtcUtils.BytesToString(b));
             }
+            byte[] stopHash = br.ReadBytes(32);
 
-            BtcLog.Print("Recieved getheaders but not currently doing anything with it");
+            BtcBlockHeader location = null;
+            foreach (byte[] hash in hashes)
+            {
+                location = BtcBlockChain.FindBlockHeader(hash);
+                if (location != null)
+                    break;
+            }
 
+            if (location != null)
+            {
+                List<BtcBlockHeader> headers = new List<BtcBlockHeader>();
+                while (headers.Count < 2000 && location.Next != null && !BtcUtils.HashEquals(location.Next.Hash, stopHash))
+                {
+                    location = location.Next;
+                    headers.Add(location);
+                }
+
+                MemoryStream ms = new MemoryStream();
+                BinaryWriter bw = new BinaryWriter(ms);
+                BtcUtils.WriteVarInt(bw, headers.Count);
+                foreach (BtcBlockHeader bh in headers)
+                    bh.Write(bw);
+
+                SendPacket("headers", ms.ToArray());
+                bw.Close();
+            }
+
+            //TimeSpan ts = DateTime.Now - start;
+            //BtcLog.Print("getheaders command took {0} seconds", ts.TotalSeconds.ToString());
         }
 
         void ProcessHeaders(byte[] data)
@@ -284,6 +314,7 @@ namespace BtcLib
             for (long i = 0; i < count; i++)
             {
                 BtcBlockHeader header = new BtcBlockHeader(br);
+                header.Dirty = true;
                 OnHeader?.Invoke(this, header);
             }
 

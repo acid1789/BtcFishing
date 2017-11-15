@@ -22,6 +22,7 @@ namespace BtcLib
 
         public BtcBlockHeader Prev { get; set; }
         public BtcBlockHeader Next { get; set; }
+        public bool Dirty { get; set; }
 
         public byte[] PrevHash { get { return _prevBlock; } }
 
@@ -62,6 +63,17 @@ namespace BtcLib
                 }
                 return _hash;
             }
+        }
+
+        public void Write(BinaryWriter bw)
+        {
+            bw.Write(_version);
+            bw.Write(_prevBlock);
+            bw.Write(_merkleRoot);
+            bw.Write(_timestamp);
+            bw.Write(_difficulty);
+            bw.Write(_nonce);
+            BtcUtils.WriteVarInt(bw, _transactionCount);
         }
 
         public static BtcBlockHeader GenesisBlock
