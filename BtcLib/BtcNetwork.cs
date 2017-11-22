@@ -34,18 +34,32 @@ namespace BtcLib
         {
             s_Instance.InternalFetchHeaders();
         }
-
+        
         public static ulong BitcionNodeId { get { return s_Instance._BitcoinNodeId; } }
-        public static int NumConnections { get { return s_Instance._Connections.Count; } }
+        public static int NumConnections { get { return (s_Instance == null) ? 0 : s_Instance._Connections.Count; } }
         public static int NumPotentialConnections { get { return s_Instance._PossiblePeers.Count; } }
         public static int HighestHeight { get { return s_Instance._highestHeight; } }
         public static bool HeaderFetchEnabled { get; set; }
+
+        public static BtcSocket[] CurrentConnections
+        {
+            get
+            {
+                s_Instance._ConnectionsLock.WaitOne();
+                BtcSocket[] list = s_Instance._Connections.ToArray();
+                s_Instance._ConnectionsLock.ReleaseMutex();
+
+                return list;
+            }
+        }
         #endregion
 
 
         #region Private Interface
 
         #region Constants
+        const int NumSpiderThreads = 25;
+        const int MaxConnections = 1000;
         const int BitcoinPort = 8333;
         string[] BitcoinSeeds = { "66.172.10.4",
                                     "64.203.102.86",
@@ -97,7 +111,7 @@ namespace BtcLib
         #endregion
 
         ulong _BitcoinNodeId;
-        Thread _SpiderThread;
+        Thread[] _SpiderThreads;
         Thread _NetworkThread;
         Dictionary<string, bool> _BadHosts;
         Queue<string> _PossiblePeers;
@@ -123,8 +137,13 @@ namespace BtcLib
             _Connections = new List<BtcSocket>();
             _PossiblePeers = new Queue<string>(BitcoinSeeds);
             _PossiblePeerLock = new Mutex();
-            _SpiderThread = new Thread(new ThreadStart(SpiderThreadProcedure)) { Name = "SpiderThread" };
-            _SpiderThread.Start();
+
+            _SpiderThreads = new Thread[NumSpiderThreads];
+            for (int i = 0; i < _SpiderThreads.Length; i++)
+            {
+                _SpiderThreads[i] = new Thread(new ThreadStart(SpiderThreadProcedure)) { Name = "SpiderThread " + i };
+                _SpiderThreads[i].Start();
+            }
 
             _NetworkThread = new Thread(new ThreadStart(NetworkThreadProcedure)) { Name = "Network Thread" };
             _NetworkThread.Start();
@@ -135,12 +154,14 @@ namespace BtcLib
             while (true)
             {
                 // Try to connect to any possible peers
-                if (_PossiblePeers.Count > 0)
+                if (_PossiblePeers.Count > 0 && _Connections.Count < MaxConnections)
                 {
+                    string peer = null;
                     _PossiblePeerLock.WaitOne();
-                    string peer = _PossiblePeers.Dequeue();
+                    if( _PossiblePeers.Count > 0 )
+                        peer = _PossiblePeers.Dequeue();
                     _PossiblePeerLock.ReleaseMutex();
-                    if (_BadHosts.ContainsKey(peer))
+                    if (peer == null || _BadHosts.ContainsKey(peer))
                         continue;
                     BtcSocket socket = new BtcSocket();
                     if (socket.Connect(peer, BitcoinPort))
@@ -148,6 +169,7 @@ namespace BtcLib
                         socket.OnNodeDiscovered += Socket_OnNodeDiscovered;
                         socket.OnInventory += Socket_OnInventory;
                         socket.OnHeader += Socket_OnHeader;
+                        socket.OnBlock += Socket_OnBlock;
                         _ConnectionsLock.WaitOne();
                         _Connections.Add(socket);
                         _ConnectionsLock.ReleaseMutex();
@@ -221,6 +243,11 @@ namespace BtcLib
         private void Socket_OnHeader(BtcSocket arg1, BtcBlockHeader arg2)
         {
             BtcBlockChain.AddBlockHeader(arg2);
+        }
+        
+        private void Socket_OnBlock(BtcSocket arg1, BtcBlockHeader arg2, BtcTransaction[] arg3)
+        {
+            BtcBlockChain.IncommingBlock(arg1, arg2, arg3);
         }
 
         void Socket_OnInventory(BtcSocket socket, InventoryType type, byte[] hash)

@@ -13,15 +13,18 @@ namespace BtcLib
         #region Public Static Interface
         static BtcBlockChain s_Instance;
         public static uint Height { get { return s_Instance._height; } }
+        public static int BannedCount { get { return s_Instance._bannedBlockHosts.Count; } }
+        public static int CachedBlocks { get { return s_Instance._blockLibrary.Count; } }
         public static uint KnownHeight { get { return s_Instance._knownHeight; } }
         public static BtcBlockHeader Tip { get { return s_Instance._mainChain; } }
 
-        public static void Initialize()
+        public static void Initialize(string dataPath)
         {
             if (s_Instance != null)
                 throw new Exception("BtcBlockChain singleton already initialized");
 
-            s_Instance = new BtcBlockChain();
+            Directory.CreateDirectory(dataPath);
+            s_Instance = new BtcBlockChain(dataPath);
         }
 
         public static void Shutdown()
@@ -36,12 +39,19 @@ namespace BtcLib
 
         public static void AddKnownBlock(byte[] blockHash)
         {
-            BtcLog.Print("AddKnownBlock: " + BtcUtils.BytesToString(blockHash));
+            BtcBlockHeader h = FindBlockHeader(blockHash);
+            if (h == null)
+                BtcLog.Print("AddKnownBlock: " + BtcUtils.BytesToString(blockHash));
         }
 
         public static void AddBlockHeader(BtcBlockHeader header)
         {
             s_Instance.AddHeader(header);
+        }
+
+        public static void IncommingBlock(BtcSocket from, BtcBlockHeader header, BtcTransaction[] transactions)
+        {
+            s_Instance.IncommingBlockI(from, header, transactions);
         }
 
         public static BtcBlockHeader FindBlockHeader(byte[] hash)
@@ -54,6 +64,7 @@ namespace BtcLib
 
         #region Private Interface
         Thread _thread;
+        string _dataPath;
 
         uint _height;
         uint _knownHeight;
@@ -61,15 +72,30 @@ namespace BtcLib
         List<BtcBlockHeader> _chainFragments;
         BtcBlockHeader _mainChain;
 
-        DateTime _lastDiskSync;
+        HashSet<string> _blockLibrary;
 
-        BtcBlockChain()
+        DateTime _lastDiskSync;
+        DateTime _lastBlockRequest;
+        HashSet<BtcSocket> _bannedBlockHosts;
+        Dictionary<BtcSocket, BtcBlockRequest> _pendingBlockRequests;
+        Dictionary<string, object> _pendingIncommingBlocks;
+        Mutex _pendingIncommingBlocksLock;
+
+        BtcBlockChain(string dataPath)
         {
+            _dataPath = dataPath;
             _chainFragments = new List<BtcBlockHeader>();
             _mainChain = BtcBlockHeader.GenesisBlock;
             _height = 0;
             _knownHeight = 0;
             LoadHeaders();
+            CountChain();
+
+            InitBlockLibrary();
+            _pendingBlockRequests = new Dictionary<BtcSocket, BtcBlockRequest>();
+            _pendingIncommingBlocks = new Dictionary<string, object>();
+            _pendingIncommingBlocksLock = new Mutex();
+            _bannedBlockHosts = new HashSet<BtcSocket>();
 
             _thread = new Thread(new ThreadStart(BlockChainThreadProc)) { Name = "Block Chain Thread" };
             _thread.Start();
@@ -81,23 +107,183 @@ namespace BtcLib
             {
                 if ((DateTime.Now - _lastDiskSync).TotalSeconds > 10)
                     DoDiskSync();
-                
+
+                if (BtcNetwork.NumConnections > 10 && (DateTime.Now - _lastBlockRequest).TotalSeconds > 15 && _blockLibrary.Count < _knownHeight)
+                    FetchMissingBlocks();
+
+                ProcessPendingIncommingBlocks();
+
+
 
                 Thread.Sleep(100);
             }
         }
 
+        void InitBlockLibrary()
+        {
+            // Make sure blocks directory exists
+            Directory.CreateDirectory("blocks");
+
+            // Get all blocks in the directory
+            string prefix = _dataPath + "/blocks";
+            string[] blocks = Directory.GetFiles(prefix, "*.block", SearchOption.TopDirectoryOnly);
+
+            // Store them in the library
+            _blockLibrary = new HashSet<string>();
+            foreach (string block in blocks)
+            {
+                string bs = block.Substring(prefix.Length + 1, block.Length - (prefix.Length + 7));
+                _blockLibrary.Add(bs);
+            }
+
+        }
+
+        bool WaitingForBlock(string hashStr)
+        {
+            foreach (var kvp in _pendingBlockRequests)
+            {
+                if (kvp.Value.RequestedBlocks.Contains(hashStr))
+                    return true;
+            }
+            return false;
+        }
+
+        void FetchMissingBlocks()
+        {
+            // Build a list of all the blocks that are missing
+            List<byte[]> missingBlocks = new List<byte[]>();
+            BtcBlockHeader iter = BtcBlockHeader.GenesisBlock;
+            while (iter != null)
+            {
+                string hash = BtcUtils.BytesToString(iter.Hash);
+                if (!_blockLibrary.Contains(hash) && !WaitingForBlock(hash))
+                    missingBlocks.Add(iter.Hash);
+                iter = iter.Next;
+            }
+
+            BtcSocket[] connections = BtcNetwork.CurrentConnections;
+            int notBanned = connections.Length - _bannedBlockHosts.Count;
+            if (notBanned < 10) 
+                _bannedBlockHosts.Clear(); // everyone is banned, unban them all
+            int missingIndex = 0;
+            int requests = 0;
+            foreach (BtcSocket con in connections)
+            {
+                if (!_pendingBlockRequests.ContainsKey(con) && !_bannedBlockHosts.Contains(con))
+                {
+                    int fetchCount = Math.Min(missingBlocks.Count - missingIndex, 500);
+                    con.RequestBlocks(missingBlocks, missingIndex, fetchCount);
+
+                    HashSet<string> reqBlocks = new HashSet<string>();
+                    for (int i = missingIndex; i < missingIndex + fetchCount; i++)
+                        reqBlocks.Add(BtcUtils.BytesToString(missingBlocks[i]));
+                    _pendingBlockRequests[con] = new BtcBlockRequest() { LastSeenTime = DateTime.Now, RequestedBlocks = reqBlocks, RequestedCount = fetchCount };
+
+                    requests++;
+                    missingIndex += fetchCount;
+
+                    if (missingIndex >= missingBlocks.Count)
+                        break;
+                }
+            }
+            BtcLog.Print("Requested {0} blocks from {1} peers", missingIndex.ToString(), requests.ToString());
+
+            _lastBlockRequest = DateTime.Now;
+        }
+
+        void IncommingBlockI(BtcSocket from, BtcBlockHeader header, BtcTransaction[] transactions)
+        {
+            string hashStr = BtcUtils.BytesToString(header.Hash);
+            object obj = new object[] { from, transactions };
+
+            _pendingIncommingBlocksLock.WaitOne();
+            if (_pendingIncommingBlocks.ContainsKey(hashStr))
+            {
+                BtcLog.Print("Duplicate block received {0} from {1} and {2}", hashStr, from.RemoteHost, ((BtcSocket)((object[])_pendingIncommingBlocks[hashStr])[0]).RemoteHost);
+            }
+            else
+                _pendingIncommingBlocks[hashStr] = obj;
+            _pendingIncommingBlocksLock.ReleaseMutex();
+        }
+
+        void ProcessPendingIncommingBlocks()
+        {
+            if (_pendingIncommingBlocks.Count > 0)
+            {
+                _pendingIncommingBlocksLock.WaitOne();
+                var incommingBlocks = _pendingIncommingBlocks.ToArray();
+                _pendingIncommingBlocks.Clear();
+                _pendingIncommingBlocksLock.ReleaseMutex();
+
+                foreach (var kvp in incommingBlocks)
+                {
+                    object[] p = (object[])kvp.Value;
+                    BtcSocket from = (BtcSocket)p[0];
+                    BtcTransaction[] transactions = (BtcTransaction[])p[1];
+                    if (_pendingBlockRequests.ContainsKey(from))
+                    {
+                        _pendingBlockRequests[from].LastSeenTime = DateTime.Now;
+                        _pendingBlockRequests[from].RequestedBlocks.Remove(kvp.Key);
+                        if (_pendingBlockRequests[from].RequestedBlocks.Count <= 0)
+                            _pendingBlockRequests.Remove(from);
+                    }
+
+                    SaveBlock(kvp.Key, transactions);
+                }
+            }
+            else
+            {
+                List<BtcSocket> remove = new List<BtcSocket>();
+                foreach (var kvp in _pendingBlockRequests)
+                {
+                    TimeSpan ts = DateTime.Now - kvp.Value.LastSeenTime;
+                    if (ts.TotalSeconds > 60)
+                    {
+                        BtcLog.Print("Block Request timeout from host {0}. Putitng {1} blocks back into the pool", kvp.Key.RemoteHost, kvp.Value.RequestedBlocks.Count.ToString());
+                        if (kvp.Value.RequestedBlocks.Count == kvp.Value.RequestedCount)
+                            _bannedBlockHosts.Add(kvp.Key);
+                        remove.Add(kvp.Key);
+                    }
+                }
+                foreach (BtcSocket s in remove)
+                    _pendingBlockRequests.Remove(s);
+            }
+        }
+
+        void SaveBlock(string hashStr, BtcTransaction[] transactions)
+        {
+            if (!_blockLibrary.Contains(hashStr))
+            {
+                FileStream blockFile = File.Create(_dataPath + "/blocks/" + hashStr + ".block");
+
+                BinaryWriter bw = new BinaryWriter(blockFile);
+
+                foreach (BtcTransaction tx in transactions)
+                    tx.Write(bw);
+
+                bw.Close();
+
+                _blockLibrary.Add(hashStr);
+            }
+        }
+
         void LoadHeaders()
         {
-            FileStream fs = File.OpenRead("blocks.headers");
-            BinaryReader br = new BinaryReader(fs);
-
-            while (fs.Position < fs.Length)
+            try
             {
-                BtcBlockHeader bh = new BtcBlockHeader(br);
-                AddHeader(bh);
+                FileStream fs = File.OpenRead(_dataPath + "/blocks.headers");
+                BinaryReader br = new BinaryReader(fs);
+
+                while (fs.Position < fs.Length)
+                {
+                    BtcBlockHeader bh = new BtcBlockHeader(br);
+                    AddHeader(bh);
+                }
+                br.Close();
             }
-            br.Close();
+            catch (Exception)
+            {
+            }
         }
 
         void DoDiskSync()
@@ -132,7 +318,7 @@ namespace BtcLib
 
                 bw.Close();
             }
-            
+
             _lastDiskSync = DateTime.Now;
         }
 
@@ -214,7 +400,7 @@ namespace BtcLib
         void CountChain()
         {
             uint headers = 0;
-            
+
             BtcBlockHeader iter = _mainChain;
             while (iter.Prev != null)
             {

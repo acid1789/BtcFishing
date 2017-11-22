@@ -36,6 +36,7 @@
             this.lblBlocks = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
             this.lblPotentials = new System.Windows.Forms.Label();
+            this.lblBlockHeaders = new System.Windows.Forms.Label();
             this.SuspendLayout();
             // 
             // label1
@@ -73,10 +74,10 @@
             // lblBlocks
             // 
             this.lblBlocks.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.lblBlocks.Location = new System.Drawing.Point(537, 9);
+            this.lblBlocks.Location = new System.Drawing.Point(703, 9);
             this.lblBlocks.Name = "lblBlocks";
             this.lblBlocks.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
-            this.lblBlocks.Size = new System.Drawing.Size(313, 13);
+            this.lblBlocks.Size = new System.Drawing.Size(147, 13);
             this.lblBlocks.TabIndex = 3;
             this.lblBlocks.Text = "blocks 2323/23";
             this.lblBlocks.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -99,11 +100,23 @@
             this.lblPotentials.TabIndex = 5;
             this.lblPotentials.Text = "lblPotentials";
             // 
+            // lblBlockHeaders
+            // 
+            this.lblBlockHeaders.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.lblBlockHeaders.Location = new System.Drawing.Point(550, 9);
+            this.lblBlockHeaders.Name = "lblBlockHeaders";
+            this.lblBlockHeaders.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+            this.lblBlockHeaders.Size = new System.Drawing.Size(147, 13);
+            this.lblBlockHeaders.TabIndex = 6;
+            this.lblBlockHeaders.Text = "blocks 2323/23";
+            this.lblBlockHeaders.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(862, 522);
+            this.Controls.Add(this.lblBlockHeaders);
             this.Controls.Add(this.lblPotentials);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.lblBlocks);
@@ -126,6 +139,7 @@
         private System.Windows.Forms.Label lblBlocks;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label lblPotentials;
+        private System.Windows.Forms.Label lblBlockHeaders;
     }
 }
 

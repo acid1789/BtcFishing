@@ -9,7 +9,7 @@ using System.IO;
 
 namespace BtcLib
 {
-    class BtcSocket
+    public class BtcSocket
     {
         public static readonly byte[] OriginBlockHash = { 0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72, 0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f, 0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c, 0x68, 0xd6, 0x19, 00, 00, 00, 00, 00 };
         const uint MainNetworkID = 0xD9B4BEF9;
@@ -18,7 +18,6 @@ namespace BtcLib
         Socket _socket;
         bool _verrified;
         byte[] _pendingData;
-        int _pendingDataOffset;
         string _remoteHost;
         int _score;
 
@@ -32,10 +31,10 @@ namespace BtcLib
         public event Action<BtcSocket, BtcNetworkAddress> OnNodeDiscovered;
         public event Action<BtcSocket, BtcNetwork.InventoryType, byte[]> OnInventory;
         public event Action<BtcSocket, BtcBlockHeader> OnHeader;
+        public event Action<BtcSocket, BtcBlockHeader, BtcTransaction[]> OnBlock;
 
         public BtcSocket()
         {
-            _pendingData = new byte[1024 * 1024 * 3];
             _socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
             _socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, false);
         }
@@ -68,7 +67,7 @@ namespace BtcLib
             {
                 if (!Update())
                     break;
-
+                
                 if ((DateTime.Now - start).TotalSeconds > 2)
                 {
                     _socket.Close();
@@ -93,20 +92,32 @@ namespace BtcLib
 
             if (_socket.Available > 0)
             {
-                int spaceRemaining = _pendingData.Length - _pendingDataOffset;
-                if (spaceRemaining < _socket.Available)
-                    throw new Exception("Not Enoguh space in socket read buffer");
-                int bytesRead = _socket.Receive(_pendingData, _pendingDataOffset, spaceRemaining, SocketFlags.None);
-                _pendingDataOffset += bytesRead;
+                byte[] recvBuffer = new byte[_socket.Available];
+                int bytesRead = _socket.Receive(recvBuffer, 0, recvBuffer.Length, SocketFlags.None);
+
+                if (_pendingData != null)
+                {
+                    byte[] combined = new byte[_pendingData.Length + bytesRead];
+                    Buffer.BlockCopy(_pendingData, 0, combined, 0, _pendingData.Length);
+                    Buffer.BlockCopy(recvBuffer, 0, combined, _pendingData.Length, bytesRead);
+                    _pendingData = combined;
+                }
+                else
+                    _pendingData = recvBuffer;                
             }
 
-            if (_pendingDataOffset > 0)
+            if (_pendingData != null)
             {
                 int consumedBytes = ProcessPackets();
-                int remainingBytes = _pendingDataOffset - consumedBytes;
+                int remainingBytes = _pendingData.Length - consumedBytes;
                 if (remainingBytes > 0)
-                    Buffer.BlockCopy(_pendingData, consumedBytes, _pendingData, 0, remainingBytes);
-                _pendingDataOffset = remainingBytes;
+                {
+                    byte[] newPending = new byte[remainingBytes];
+                    Buffer.BlockCopy(_pendingData, consumedBytes, newPending, 0, remainingBytes);
+                    _pendingData = newPending;
+                }
+                else
+                    _pendingData = null;
             }
 
             return true;
@@ -139,54 +150,61 @@ namespace BtcLib
         #region Packet Processing
         int ProcessPackets()
         {
-            MemoryStream ms = new MemoryStream(_pendingData);
-            BinaryReader br = new BinaryReader(ms);
-
-            uint magic = br.ReadUInt32();
-            if (magic != MainNetworkID)
+            try
             {
-                // This is not a bitcoin packet start, try to find one
-                bool found = false;
-                for (long i = 1; i < _pendingDataOffset - 4; i++)
+                MemoryStream ms = new MemoryStream(_pendingData);
+                BinaryReader br = new BinaryReader(ms);
+
+                uint magic = br.ReadUInt32();
+                if (magic != MainNetworkID)
                 {
-                    ms.Seek(i, SeekOrigin.Begin);
-                    magic = br.ReadUInt32();
-                    if (magic == MainNetworkID)
+                    // This is not a bitcoin packet start, try to find one
+                    bool found = false;
+                    for (long i = 1; i < _pendingData.Length - 4; i++)
                     {
-                        found = true;
-                        break;
+                        ms.Seek(i, SeekOrigin.Begin);
+                        magic = br.ReadUInt32();
+                        if (magic == MainNetworkID)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        // Didn't find a bitcoin packet in what we have, throw it all away
+                        return _pendingData.Length;
                     }
                 }
-                if (!found)
+
+                byte[] cmdBytes = br.ReadBytes(12);
+                int payloadSize = br.ReadInt32();
+                int checksum = br.ReadInt32();
+
+                if (payloadSize + ms.Position <= _pendingData.Length)
                 {
-                    // Didn't find a bitcoin packet in what we have, throw it all away
-                    return _pendingDataOffset;
+                    // We have all the data for this packet
+                    byte[] payload = br.ReadBytes(payloadSize);
+
+                    // Hash the payload and check against the header hash
+                    int chk = GenerateChecksum(payload);
+                    if (chk == checksum)
+                    {
+                        string command = GetCommandString(cmdBytes);
+                        ProcessCommand(command, payload);
+                    }
                 }
+                else
+                    return 0;   // Not enough data for this packet yet, don't do anything
+
+                int eaten = (int)ms.Position;
+                br.Close();
+                return eaten;
             }
-
-            byte[] cmdBytes = br.ReadBytes(12);
-            int payloadSize = br.ReadInt32();
-            int checksum = br.ReadInt32();
-
-            if (payloadSize + ms.Position <= _pendingDataOffset)
+            catch (Exception ex)
             {
-                // We have all the data for this packet
-                byte[] payload = br.ReadBytes(payloadSize);
-
-                // Hash the payload and check against the header hash
-                int chk = GenerateChecksum(payload);
-                if (chk == checksum)
-                {
-                    string command = GetCommandString(cmdBytes);
-                    ProcessCommand(command, payload);
-                }
+                return 0;
             }
-            else
-                return 0;   // Not enough data for this packet yet, don't do anything
-
-            int eaten = (int)ms.Position;
-            br.Close();
-            return eaten;
         }
 
         void ProcessCommand(string command, byte[] payload)
@@ -204,6 +222,7 @@ namespace BtcLib
                 case "headers": ProcessHeaders(payload); break;
                 case "inv": ProcessInv(payload); break;
                 case "encinit": ProcessEncInit(payload); break;
+                case "block": ProcessBlock(payload); break;
                 default:
                     BtcLog.Print("ProcessCommand - Unhandled command: " + command);
                     break;
@@ -348,6 +367,20 @@ namespace BtcLib
             BtcLog.Print("encinit receivied from remote host {0}, not supported", _remoteHost);
             _socket.Close();            
         }
+
+        void ProcessBlock(byte[] data)
+        {
+            BinaryReader br = new BinaryReader(new MemoryStream(data));
+            BtcBlockHeader header = new BtcBlockHeader(br);
+            List<BtcTransaction> transactions = new List<BtcTransaction>();
+            for (int i = 0; i < header.TransactionCount; i++)
+            {
+                BtcTransaction tx = new BtcTransaction(br);
+                transactions.Add(tx);
+            }
+
+            OnBlock?.Invoke(this, header, transactions.ToArray());
+        }
         #endregion
 
         int GenerateChecksum(byte[] data)
@@ -435,9 +468,25 @@ namespace BtcLib
             SendPacket("getheaders", ms.ToArray());
             bw.Close();
         }
+
+        public void RequestBlocks(List<byte[]> blockHashes, int startIndex, int count)
+        {
+            MemoryStream ms = new MemoryStream();
+            BinaryWriter bw = new BinaryWriter(ms);
+            
+            BtcUtils.WriteVarInt(bw, count);
+            for (int i = 0; i < count; i++)
+            {
+                bw.Write((int)2);   // MSG_BLOCK
+                bw.Write(blockHashes[startIndex + i]);
+            }
+
+            SendPacket("getdata", ms.ToArray());
+            bw.Close();
+        }
     }
 
-    class BtcNetworkAddress
+    public class BtcNetworkAddress
     {
         uint _timeStamp;
         ulong _services;

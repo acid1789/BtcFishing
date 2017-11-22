@@ -23,6 +23,7 @@ namespace BtcLib
         public BtcBlockHeader Prev { get; set; }
         public BtcBlockHeader Next { get; set; }
         public bool Dirty { get; set; }
+        public long TransactionCount { get { return _transactionCount; } }
 
         public byte[] PrevHash { get { return _prevBlock; } }
 

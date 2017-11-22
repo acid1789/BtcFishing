@@ -131,9 +131,9 @@ namespace BtcLib
             return set;
         }
 
-        public static string BytesToString(byte[] bytes)
+        public static string BytesToString(byte[] bytes, bool prefix = false)
         {
-            string str = "0x";
+            string str = prefix ? "0x" : "";
             foreach (byte b in bytes)
                 str += b.ToString("X2");
             return str;

@@ -21,7 +21,7 @@ namespace BtcFishingUI
             _logger = new UILogger();
             _logger.OnLogString += _logger_OnLogString;
 
-            BtcLib.BtcBlockChain.Initialize();
+            BtcLib.BtcBlockChain.Initialize("D:/Bitcoin");
             BtcLib.BtcNetwork.Initialize();
         }
 
@@ -40,7 +40,8 @@ namespace BtcFishingUI
             {
                 lblConnections.Text = BtcLib.BtcNetwork.NumConnections.ToString();
                 lblPotentials.Text = BtcLib.BtcNetwork.NumPotentialConnections.ToString();
-                lblBlocks.Text = string.Format("Blocks {0} / {1}", BtcLib.BtcBlockChain.Height, BtcLib.BtcBlockChain.KnownHeight);
+                lblBlockHeaders.Text = string.Format("Banned {0} / Not {1}", BtcLib.BtcBlockChain.BannedCount, BtcLib.BtcNetwork.NumConnections - BtcLib.BtcBlockChain.BannedCount);
+                lblBlocks.Text = string.Format("Blocks {0} / {1}", BtcLib.BtcBlockChain.CachedBlocks, BtcLib.BtcBlockChain.KnownHeight);
             }
             catch (Exception) { }
         }

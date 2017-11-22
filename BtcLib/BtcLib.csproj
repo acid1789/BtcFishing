@@ -44,9 +44,11 @@
     <Compile Include="BtcAlert.cs" />
     <Compile Include="BtcBlockChain.cs" />
     <Compile Include="BtcBlockHeader.cs" />
+    <Compile Include="BtcBlockRequest.cs" />
     <Compile Include="BtcLog.cs" />
     <Compile Include="BtcSocket.cs" />
     <Compile Include="BtcNetwork.cs" />
+    <Compile Include="BtcTransaction.cs" />
     <Compile Include="BtcUtils.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
