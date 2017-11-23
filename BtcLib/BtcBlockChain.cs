@@ -76,10 +76,13 @@ namespace BtcLib
 
         DateTime _lastDiskSync;
         DateTime _lastBlockRequest;
+        DateTime _lastBlockArchive;
         HashSet<BtcSocket> _bannedBlockHosts;
         Dictionary<BtcSocket, BtcBlockRequest> _pendingBlockRequests;
         Dictionary<string, object> _pendingIncommingBlocks;
         Mutex _pendingIncommingBlocksLock;
+
+        Thread _blockArchiveThread;
 
         BtcBlockChain(string dataPath)
         {
@@ -96,7 +99,7 @@ namespace BtcLib
             _pendingIncommingBlocks = new Dictionary<string, object>();
             _pendingIncommingBlocksLock = new Mutex();
             _bannedBlockHosts = new HashSet<BtcSocket>();
-
+            
             _thread = new Thread(new ThreadStart(BlockChainThreadProc)) { Name = "Block Chain Thread" };
             _thread.Start();
         }
@@ -113,7 +116,12 @@ namespace BtcLib
 
                 ProcessPendingIncommingBlocks();
 
-
+                if (_blockArchiveThread == null && (DateTime.Now - _lastBlockArchive).TotalSeconds > 300)
+                {
+                    _blockArchiveThread = new Thread(ArchiveBlocks);
+                    _blockArchiveThread.Start();
+                    _lastBlockArchive = DateTime.Now;
+                }
 
                 Thread.Sleep(100);
             }
@@ -122,7 +130,7 @@ namespace BtcLib
         void InitBlockLibrary()
         {
             // Make sure blocks directory exists
-            Directory.CreateDirectory("blocks");
+            Directory.CreateDirectory(_dataPath + "/blocks");
 
             // Get all blocks in the directory
             string prefix = _dataPath + "/blocks";
@@ -136,6 +144,14 @@ namespace BtcLib
                 _blockLibrary.Add(bs);
             }
 
+            // Index all the existing archives
+            string[] archives = Directory.GetFiles(prefix, "*.archiveL", SearchOption.TopDirectoryOnly);
+            foreach (string archive in archives)
+            {
+                string[] hashes = File.ReadAllLines(archive);
+                foreach (string hash in hashes)
+                    _blockLibrary.Add(hash);
+            }
         }
 
         bool WaitingForBlock(string hashStr)
@@ -163,13 +179,13 @@ namespace BtcLib
 
             BtcSocket[] connections = BtcNetwork.CurrentConnections;
             int notBanned = connections.Length - _bannedBlockHosts.Count;
-            if (notBanned < 10) 
+            if (notBanned < 10)
                 _bannedBlockHosts.Clear(); // everyone is banned, unban them all
             int missingIndex = 0;
             int requests = 0;
             foreach (BtcSocket con in connections)
             {
-                if (!_pendingBlockRequests.ContainsKey(con) && !_bannedBlockHosts.Contains(con))
+                if (con.SendsBlocks == BtcSocket.BlockSendState.SendsBlocks && !_pendingBlockRequests.ContainsKey(con) && !_bannedBlockHosts.Contains(con))
                 {
                     int fetchCount = Math.Min(missingBlocks.Count - missingIndex, 500);
                     con.RequestBlocks(missingBlocks, missingIndex, fetchCount);
@@ -186,7 +202,8 @@ namespace BtcLib
                         break;
                 }
             }
-            BtcLog.Print("Requested {0} blocks from {1} peers", missingIndex.ToString(), requests.ToString());
+            if (missingIndex > 0)
+                BtcLog.Print("Requested {0} blocks from {1} peers", missingIndex.ToString(), requests.ToString());
 
             _lastBlockRequest = DateTime.Now;
         }
@@ -305,7 +322,7 @@ namespace BtcLib
             if (dirtyBlocks)
             {
                 // At least one block is dirty, starting at iter
-                FileStream fs = File.OpenWrite("blocks.headers");
+                FileStream fs = File.OpenWrite(_dataPath + "/blocks.headers");
                 fs.Seek(blockIndex * 81, SeekOrigin.Begin);
                 BinaryWriter bw = new BinaryWriter(fs);
 
@@ -409,6 +426,121 @@ namespace BtcLib
             }
 
             _knownHeight = headers;
+        }
+
+        #endregion
+
+        #region Block Archiving
+        void ArchiveBlocks()
+        {
+            string prefix = _dataPath + "/blocks/";
+            
+            // Get all blocks in the directory
+            string[] rawBlocks = Directory.GetFiles(prefix, "*.block", SearchOption.TopDirectoryOnly);
+
+            List<string> blockFiles = new List<string>();
+            foreach (string s in rawBlocks)
+            {
+                string blockName = s.Substring(prefix.Length);
+                blockFiles.Add(blockName);
+            }
+            blockFiles.Sort();
+
+            for (int i = 0; i < blockFiles.Count;)
+            {
+                List<string> likeFiles = new List<string>();
+                string twoBytes = blockFiles[i].Substring(0, 2);
+                likeFiles.Add(blockFiles[i]);
+                for (int j = i + 1; j < blockFiles.Count; j++)
+                {
+                    if (blockFiles[j].StartsWith(twoBytes))
+                        likeFiles.Add(blockFiles[j]);
+                    else
+                        break;
+                }
+                i += likeFiles.Count;
+
+                // Load the archive if it exists
+                string archivePath = prefix + twoBytes + ".archive";
+                Dictionary<string, long> archive = LoadArchive(archivePath);
+
+                // Open the decompressed file generated by loading the archive
+                FileStream archiveStream = File.Open(archivePath + "D", FileMode.OpenOrCreate, FileAccess.ReadWrite);
+                BinaryWriter bw = new BinaryWriter(archiveStream);
+                archiveStream.Seek(0, SeekOrigin.End);
+
+                // Write all the blocks we have into this file
+                foreach (string file in likeFiles)
+                {
+                    string hash = file.Substring(0, 64);
+                    if (!archive.ContainsKey(hash))
+                    {
+                        byte[] fileData = File.ReadAllBytes(prefix + file);
+
+                        bw.Write(BtcUtils.StringToBytes(hash));
+                        bw.Write(fileData.Length);
+                        archive[hash] = archiveStream.Position;
+                        bw.Write(fileData);
+
+                        File.Delete(prefix + file);
+                    }
+                }
+
+                // Compress the archive
+                CompressArchive(archivePath, archiveStream);
+
+                // Delete the decompressed file
+                File.Delete(archivePath + "D");
+
+                // Write the archive index
+                File.WriteAllLines(archivePath + "L", archive.Keys.ToArray());
+            }
+        }
+
+        Dictionary<string, long> LoadArchive(string archiveName)
+        {
+            Dictionary<string, long> archive = new Dictionary<string, long>();
+            
+            if (File.Exists(archiveName))
+            {                
+                string decompressedFile = archiveName + "D";
+                if (File.Exists(decompressedFile))
+                    File.Delete(decompressedFile);
+
+                FileStream decomp = File.Create(decompressedFile);
+
+                FileStream comp = File.OpenRead(archiveName);
+                DeflateStream ds = new DeflateStream(decomp, CompressionMode.Decompress);
+                ds.CopyTo(decomp);
+                ds.Close();
+
+                comp.Close();
+
+                BinaryReader br = new BinaryReader(File.OpenRead(decompressedFile));
+
+                while (br.BaseStream.Position < br.BaseStream.Length)
+                {
+                    byte[] hash = br.ReadBytes(32);
+                    int dataLen = br.ReadInt32();
+
+                    archive.Add(BtcUtils.BytesToString(hash), br.BaseStream.Position);
+
+                    br.BaseStream.Seek(dataLen, SeekOrigin.Current);
+                }
+                br.Close();
+            }
+
+            return archive;
+        }
+
+        void CompressArchive(string archivePath, FileStream archiveStream)
+        {
+            archiveStream.Seek(0, SeekOrigin.Begin);
+            FileStream archive = File.Create(archivePath);
+            DeflateStream ds = new DeflateStream(archive, CompressionMode.Compress);
+            archiveStream.CopyTo(ds);
+            archiveStream.Close();
+            ds.Close();
         }
         #endregion
     }

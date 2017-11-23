@@ -11,7 +11,8 @@ namespace BtcLib
 {
     public class BtcSocket
     {
-        public static readonly byte[] OriginBlockHash = { 0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72, 0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f, 0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c, 0x68, 0xd6, 0x19, 00, 00, 00, 00, 00 };
+        public enum BlockSendState { Unknown, Checking, DoesntSendBlocks, SendsBlocks };
+        
         const uint MainNetworkID = 0xD9B4BEF9;
         const uint ProtocolVersion = 70015;
         const ulong NetworkServices = 1;    // For now only supporting NODE_NETWORK
@@ -21,12 +22,15 @@ namespace BtcLib
         string _remoteHost;
         int _score;
 
+        DateTime _requestedBlockTime;
+
         public string RemoteHost { get { return _remoteHost; } }
         public uint RemoteProtocolVersion { get; private set; }
         public ulong RemoteServices { get; private set; }
         public ulong RemoteTimeStamp { get; private set; }
         public string RemoteSubVersion { get; private set; }
         public int RemoteBlockHeight { get; private set; }
+        public BlockSendState SendsBlocks { get; private set; }
 
         public event Action<BtcSocket, BtcNetworkAddress> OnNodeDiscovered;
         public event Action<BtcSocket, BtcNetwork.InventoryType, byte[]> OnInventory;
@@ -79,6 +83,11 @@ namespace BtcLib
             if (_socket.Connected)
             {
                 SendPacket("getaddr", new byte[0]);
+
+                SendsBlocks = BlockSendState.Checking;
+                List<byte[]> hashes = new List<byte[]>();
+                hashes.Add(BtcBlockHeader.GenesisBlock.Hash);
+                RequestBlocks(hashes, 0, 1);
             }
 
 
@@ -118,6 +127,13 @@ namespace BtcLib
                 }
                 else
                     _pendingData = null;
+            }
+
+            if (SendsBlocks == BlockSendState.Checking)
+            {
+                TimeSpan ts = DateTime.Now - _requestedBlockTime;
+                if (ts.TotalSeconds > 15)
+                    SendsBlocks = BlockSendState.DoesntSendBlocks;
             }
 
             return true;
@@ -370,16 +386,20 @@ namespace BtcLib
 
         void ProcessBlock(byte[] data)
         {
-            BinaryReader br = new BinaryReader(new MemoryStream(data));
-            BtcBlockHeader header = new BtcBlockHeader(br);
-            List<BtcTransaction> transactions = new List<BtcTransaction>();
-            for (int i = 0; i < header.TransactionCount; i++)
+            SendsBlocks = BlockSendState.SendsBlocks;
+            if (OnBlock != null)
             {
-                BtcTransaction tx = new BtcTransaction(br);
-                transactions.Add(tx);
-            }
+                BinaryReader br = new BinaryReader(new MemoryStream(data));
+                BtcBlockHeader header = new BtcBlockHeader(br);
+                List<BtcTransaction> transactions = new List<BtcTransaction>();
+                for (int i = 0; i < header.TransactionCount; i++)
+                {
+                    BtcTransaction tx = new BtcTransaction(br);
+                    transactions.Add(tx);
+                }
 
-            OnBlock?.Invoke(this, header, transactions.ToArray());
+                OnBlock.Invoke(this, header, transactions.ToArray());
+            }
         }
         #endregion
 
@@ -483,6 +503,7 @@ namespace BtcLib
 
             SendPacket("getdata", ms.ToArray());
             bw.Close();
+            _requestedBlockTime = DateTime.Now;
         }
     }
 

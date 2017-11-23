@@ -22,6 +22,7 @@ namespace BtcFishingUI
             _logger.OnLogString += _logger_OnLogString;
 
             BtcLib.BtcBlockChain.Initialize("D:/Bitcoin");
+            BtcLib.BtcNetwork.OnlyBlockSendingNodes = true;
             BtcLib.BtcNetwork.Initialize();
         }
 

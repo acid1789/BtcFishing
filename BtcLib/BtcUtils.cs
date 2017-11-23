@@ -138,5 +138,16 @@ namespace BtcLib
                 str += b.ToString("X2");
             return str;
         }
+
+        public static byte[] StringToBytes(string str)
+        {
+            byte[] bytes = new byte[str.Length / 2];
+            for (int i = 0; i < bytes.Length; i++ )
+            {
+                string s = str.Substring(i * 2, 2);
+                bytes[i] = byte.Parse(s, System.Globalization.NumberStyles.AllowHexSpecifier);
+            }
+            return bytes;
+        }
     }
 }

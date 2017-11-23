@@ -40,6 +40,7 @@ namespace BtcLib
         public static int NumPotentialConnections { get { return s_Instance._PossiblePeers.Count; } }
         public static int HighestHeight { get { return s_Instance._highestHeight; } }
         public static bool HeaderFetchEnabled { get; set; }
+        public static bool OnlyBlockSendingNodes { get; set; }
 
         public static BtcSocket[] CurrentConnections
         {
@@ -151,6 +152,7 @@ namespace BtcLib
 
         void SpiderThreadProcedure()
         {
+            while (s_Instance == null) { }
             while (true)
             {
                 // Try to connect to any possible peers
@@ -200,6 +202,12 @@ namespace BtcLib
                             _highestHeight = peer.RemoteBlockHeight;
                             _highestHost = peer;
                         }
+                    }
+
+                    if (OnlyBlockSendingNodes && peer.SendsBlocks == BtcSocket.BlockSendState.DoesntSendBlocks)
+                    {
+                        _BadHosts.Add(peer.RemoteHost, true);
+                        remove.Add(peer);
                     }
                 }
 
